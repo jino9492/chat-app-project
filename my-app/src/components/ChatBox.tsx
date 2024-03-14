@@ -6,6 +6,7 @@ import sendIcon from "../assets/send_message_icon.png";
 import addImageIcon from "../assets/add_image_icon.png";
 import removeUploadedImageIcon from "../assets/remove_uploaded_file_icon.png"
 import classNames from "classnames";
+import { type } from "@testing-library/user-event/dist/type";
 
 const tempName = "anoymous";
 
@@ -26,13 +27,23 @@ const ChatBox = () => {
 
   const [chatArr, setChatArr] = useState<any[]>([]);
   const [chat, setChat] = useState<ChatData>({name: tempName, message: "", date: null, timeData: null});
-  const [imageFile, setImageFile] = useState<File[]>([]);
+  const [uploadedImageFile, setUploadedImageFile] = useState<File[]>([]);
 
   const [fileArrayIsEmpty, setFileArrayIsEmpty] = useState<boolean>(true);
 
   useEffect(() => {
     socket.on("receive message", (message) => {
       setChatArr((chatArr) => chatArr.concat(message));
+    });
+
+    socket.on("recieve image-file", (data) => {
+      let TYPED_ARRAY = new Uint8Array(data.file);
+      const STRING_CHAR = TYPED_ARRAY.reduce((data, byte)=> {
+        return data + String.fromCharCode(byte);
+      }, '');
+      let base64String = btoa(STRING_CHAR);
+      const imageurl = "data:image/jpg;base64," + base64String;
+      setChatArr((chatArr) => chatArr.concat([{name: tempName, message: imageurl, date:data.date, timeData:data.timeData}]));
     });
   }, []);
 
@@ -42,12 +53,12 @@ const ChatBox = () => {
 
   // imageFile이 변경되면 배열이 비었는 지 검사.
   useEffect(() => {
-    console.log(imageFile);
-    for(let el in imageFile){
+    console.log(uploadedImageFile);
+    for(let el in uploadedImageFile){
       return;
     }
     setFileArrayIsEmpty(true);
-  }, [imageFile]);
+  }, [uploadedImageFile]);
 
   const textClear = () => {
     inputRef.current.value = "";
@@ -70,11 +81,20 @@ const ChatBox = () => {
   }
 
   const buttonHandler = () => {
+    const curDate = new Date();
+    const curDateFormatted = timestamp(curDate);
+
     if (chat.message != ""){
-      const curDate = new Date();
-      const curDateFormatted = timestamp(curDate);
       socket.emit("send message", { name: tempName, message: chat.message, date: curDateFormatted, timeData: curDate.getTime()});
       textClear();
+    }
+
+    if (!fileArrayIsEmpty){
+      uploadedImageFile.map((el) => {
+        socket.emit("send image-file", { name: tempName, file: el, date: curDateFormatted, timeData: curDate.getTime() });
+      });
+
+      setUploadedImageFile([]);
     }
   };
 
@@ -86,7 +106,7 @@ const ChatBox = () => {
     if (e.target.files != null){
       for(let i = 0; i < e.target.files.length; i++){
         let file = [e.target.files![i]];
-        setImageFile((imageFile) => imageFile.concat(file));
+        setUploadedImageFile((imageFile) => imageFile.concat(file));
       }
     }
 
@@ -94,13 +114,13 @@ const ChatBox = () => {
   }
 
   const removeUploadedImage = (index:number) => {
-    setImageFile((imageFile) => {
+    setUploadedImageFile((imageFile) => {
       delete imageFile[index];
       return imageFile;
     });
 
     // 빈 배열을 concat해서 배열의 상태를 변화시킨 뒤 re-render
-    setImageFile((imageFile) => imageFile.concat([]));
+    setUploadedImageFile((imageFile) => imageFile.concat([]));
   }
 
   const keyEventHandler = (e:React.KeyboardEvent<HTMLInputElement>) => {
@@ -115,25 +135,43 @@ const ChatBox = () => {
 
   return (
     <div className="chat-box__container">
+      <div></div>
       <div className="chat-box__window" ref={chatBoxRef}>
         {chatArr.map((element, index, array) => {
           let preIdx = 0;
           if(index > 0)
             preIdx = index - 1;
-
-          if(!checkMessageInterval(array[index].timeData - array[preIdx].timeData) || (preIdx <= 0 && index <= 0))
-            return(
-              <div className="chat-box__chat">
-                <div className="chat-box__chatter-name">{element.name}<div className="chat-box__chat-time">{element.date}</div></div>
+          console.log(element.message.search("(data:image)\/(jpg;base64,)"));
+          if(!element.message.search("(data:image)\/(jpg;base64,)")){
+            if(!checkMessageInterval(array[index].timeData - array[preIdx].timeData) || (preIdx <= 0 && index <= 0))
+              return(
+                <div className="chat-box__chat">
+                  <div className="chat-box__chatter-name">{element.name}<div className="chat-box__chat-time">{element.date}</div></div>
+                  <img className="chat-box__chat-image" src={element.message}></img>
+                </div>
+              )
+            else
+              return(
+                <div className="chat-box__chat">
+                  <img className="chat-box__chat-image" src={element.message}></img>
+                </div>
+              )
+          }
+          else{
+            if(!checkMessageInterval(array[index].timeData - array[preIdx].timeData) || (preIdx <= 0 && index <= 0))
+              return(
+                <div className="chat-box__chat">
+                  <div className="chat-box__chatter-name">{element.name}<div className="chat-box__chat-time">{element.date}</div></div>
+                  <div className="chat-box__chat-log">{element.message}</div>
+                </div>
+              )
+            else
+              return(
+                <div className="chat-box__chat">
                 <div className="chat-box__chat-log">{element.message}</div>
               </div>
-            )
-          else
-            return(
-              <div className="chat-box__chat">
-              <div className="chat-box__chat-log">{element.message}</div>
-            </div>
-            )
+              )
+          }
           })}
       </div>
       <form className="chat-box__input-wrapper" method="" onSubmit={(e)=>{e.preventDefault();}} onKeyDown={(e)=>{if(e.key === "Enter")e.preventDefault();}}>
@@ -142,7 +180,7 @@ const ChatBox = () => {
           <button className="chat-box__image-button chat-box__button" onClick={imageUploadButtonHandler}><img src={addImageIcon} alt="addImageIcon" /></button>
         </div>
         <div className={classNames("chat-box__uploaded-file-box", {disabled: fileArrayIsEmpty})}>
-        {imageFile.map((element, index) => {
+        {uploadedImageFile.map((element, index) => {
           return(
             <div className="chat-box__uploaded-file-wrapper">
               <img src={URL.createObjectURL(element)} className={`chat-box__uploaded-file uploaded-file${index}`} onClick={()=>{removeUploadedImage(index);}}/>
