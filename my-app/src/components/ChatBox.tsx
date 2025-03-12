@@ -308,5 +308,4 @@ const ChatBox: React.FC<SocketProps> = (props) => {
     </div>
   );
 }
-
   export default ChatBox;
