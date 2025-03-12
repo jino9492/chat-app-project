@@ -1,52 +1,77 @@
+/* eslint-disable jsx-a11y/alt-text */
 import React, { useCallback, useEffect, useState, useRef } from "react";
-import { Socket } from "socket.io-client";
-import io from "socket.io-client";
+import io, { Socket } from "socket.io-client";
 import "../styles/ChatBox.css";
 import sendIcon from "../assets/send_message_icon.png";
 import addImageIcon from "../assets/add_image_icon.png";
 import removeUploadedImageIcon from "../assets/remove_uploaded_file_icon.png"
 import classNames from "classnames";
-import { type } from "@testing-library/user-event/dist/type";
-
-const tempName = "anoymous";
-
-const socket = io('http://localhost:8000');
-socket.emit("init", { name: tempName });
+import SocketProps from "../interfaces/interfaces";
 
 interface ChatData{
   name: string;
   message: string;
   date: string | null;
   timeData: number | null;
+  roomName: string | null;
 }
 
-const ChatBox = () => {
+const socket = io("http://localhost:8000/");
+socket.emit("init", "anoymous");
+
+const ChatBox: React.FC<SocketProps> = (props) => {
+
   const inputRef = useRef<HTMLInputElement>(document.createElement("input"));
   const chatBoxRef = useRef<HTMLDivElement>(document.createElement("div"));
   const imageInputRef = useRef<HTMLInputElement>(document.createElement("input"));
 
   const [chatArr, setChatArr] = useState<any[]>([]);
-  const [chat, setChat] = useState<ChatData>({name: tempName, message: "", date: null, timeData: null});
+  const [chat, setChat] = useState<ChatData>(
+    {
+      name: props.userName,
+      message: "",
+      date: null,
+      timeData: null,
+      roomName: null
+    }
+  );
   const [uploadedImageFile, setUploadedImageFile] = useState<File[]>([]);
 
   const [fileArrayIsEmpty, setFileArrayIsEmpty] = useState<boolean>(true);
 
   useEffect(() => {
+    receiveMessage();
+    receiveImageFile();
+  }, []);
+
+  const receiveMessage = () => {
     socket.on("receive message", (message) => {
       setChatArr((chatArr) => chatArr.concat(message));
     });
+  }
 
-    socket.on("recieve image-file", (data) => {
-      let TYPED_ARRAY = new Uint8Array(data.file);
-      const STRING_CHAR = TYPED_ARRAY.reduce((data, byte)=> {
-        return data + String.fromCharCode(byte);
-      }, '');
-      let base64String = btoa(STRING_CHAR);
-      const imageurl = "data:image/jpg;base64," + base64String;
-      setChatArr((chatArr) => chatArr.concat([{name: tempName, message: imageurl, date:data.date, timeData:data.timeData}]));
+  const receiveImageFile = () => {
+    socket.on("recieve image file", (data) => {
+      console.log("123");
+      setChatArr((chatArr) => chatArr.concat(
+        [
+          {
+            name: props.userName,
+            message: data.file,
+            date:data.date,
+            timeData:data.timeData,
+            roomName: props.curRoom
+          }
+        ]
+      ));
     });
-  }, []);
+  }
 
+  useEffect(() => {
+    socket.emit("enter room", props.curRoom)
+  }, [props.curRoom])
+
+  // 스크롤바 아래로
   useEffect(() => {
     chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
   }, [chatArr]);
@@ -60,9 +85,53 @@ const ChatBox = () => {
     setFileArrayIsEmpty(true);
   }, [uploadedImageFile]);
 
+  const getImageMimeType = (extension:string):string => {
+    const mimeTypes = {
+      jpg: "jpeg",
+      jpeg: "jpeg",
+      png: "png",
+      gif: "gif",
+      webp: "webp",
+      svg: "svg+xml",
+    } as const;
+    return mimeTypes[extension as keyof typeof mimeTypes] || "jpeg"; // 기본값은 jpeg
+  }
+
+  const getArrayBuffer = (file: File): Promise<ArrayBuffer> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onloadend = () => {
+        const arrayBuffer = reader.result as ArrayBuffer;
+        resolve(arrayBuffer);
+      };
+
+      reader.onerror = () => reject("파일을 읽는 중 오류 발생");
+
+      reader.readAsArrayBuffer(file); // ArrayBuffer로 파일을 읽음
+    });
+  }
+
+  const handleFileUpload = async (file: File) => {
+    try {
+      const arrayBuffer = await getArrayBuffer(file);
+      return arrayBuffer; // base64 대신 ArrayBuffer 반환
+    } catch (error) {
+      console.error(error); // 오류가 발생하면 출력됩니다.
+    }
+  };
+
   const textClear = () => {
     inputRef.current.value = "";
-    setChat({name: tempName, message: "", date: null, timeData: null})
+    setChat(
+      {
+        name: props.userName,
+        message: "",
+        date: null,
+        timeData: null,
+        roomName: props.curRoom
+      }
+    )
   }
 
   const timestamp = (now:Date) => {
@@ -84,19 +153,41 @@ const ChatBox = () => {
     const curDate = new Date();
     const curDateFormatted = timestamp(curDate);
 
-    if (chat.message != ""){
-      socket.emit("send message", { name: tempName, message: chat.message, date: curDateFormatted, timeData: curDate.getTime()});
+    if (chat.message !== ""){
+      socket.emit("send message",
+        {
+          name: props.userName,
+          message: chat.message,
+          date: curDateFormatted,
+          timeData: curDate.getTime(),
+          roomName: props.curRoom
+        });
       textClear();
     }
 
     if (!fileArrayIsEmpty){
-      uploadedImageFile.map((el) => {
-        socket.emit("send image-file", { name: tempName, file: el, date: curDateFormatted, timeData: curDate.getTime() });
-      });
-
-      setUploadedImageFile([]);
+      uploadImage(curDateFormatted, curDate);
     }
+
+    console.log(chatArr);
   };
+
+  const uploadImage = (curDateFormatted: string, curDate: Date) => {
+    uploadedImageFile.forEach(async (el) => {
+      const arrayBuffer = await handleFileUpload(el);
+      console.log("Sending image file: ", arrayBuffer); // 로그 확인
+      socket.emit("send image file", {
+        name: props.userName,
+        file: arrayBuffer, // ArrayBuffer를 서버로 전송
+        type: el.type.split('/')[1],
+        date: curDateFormatted,
+        timeData: curDate.getTime(),
+        roomName: props.curRoom
+      });
+    });
+
+    setUploadedImageFile([]); // 업로드 후 파일 초기화
+  }
 
   const imageUploadButtonHandler = () => {
     imageInputRef.current.click();
@@ -106,7 +197,9 @@ const ChatBox = () => {
     if (e.target.files != null){
       for(let i = 0; i < e.target.files.length; i++){
         let file = [e.target.files![i]];
+
         setUploadedImageFile((imageFile) => imageFile.concat(file));
+        e.target.value = "";
       }
     }
 
@@ -130,49 +223,69 @@ const ChatBox = () => {
   }
 
   const changeMessage = useCallback((e:React.ChangeEvent<HTMLInputElement>) => {
-    setChat({ name: tempName, message: e.target.value, date: null, timeData: null});
+    setChat(
+      {
+        name: props.userName,
+        message: e.target.value,
+        date: null,
+        timeData: null,
+        roomName: props.curRoom
+      }
+    );
   }, [chat]);
 
   return (
     <div className="chat-box__container">
-      <div></div>
       <div className="chat-box__window" ref={chatBoxRef}>
-        {chatArr.map((element, index, array) => {
+      {chatArr.map((element, index, array) => {
           let preIdx = 0;
-          if(index > 0)
-            preIdx = index - 1;
-          console.log(element.message.search("(data:image)\/(jpg;base64,)"));
-          if(!element.message.search("(data:image)\/(jpg;base64,)")){
-            if(!checkMessageInterval(array[index].timeData - array[preIdx].timeData) || (preIdx <= 0 && index <= 0))
-              return(
-                <div className="chat-box__chat">
-                  <div className="chat-box__chatter-name">{element.name}<div className="chat-box__chat-time">{element.date}</div></div>
-                  <img className="chat-box__chat-image" src={element.message}></img>
-                </div>
-              )
-            else
-              return(
-                <div className="chat-box__chat">
-                  <img className="chat-box__chat-image" src={element.message}></img>
-                </div>
-              )
+          if (index > 0) preIdx = index - 1;
+          if (typeof element.message === 'string'){
+            // element.message가 문자열일 때 (텍스트 메시지인 경우)
+            if (!element.message.startsWith("http://localhost:8000/uploads/")) {
+              if (!checkMessageInterval(array[index].timeData - array[preIdx].timeData) || (preIdx <= 0 && index <= 0)) {
+                return (
+                  <div className="chat-box__chat" key={index}>
+                    <div className="chat-box__chatter-name">
+                      {element.name}
+                      <div className="chat-box__chat-time">{element.date}</div>
+                    </div>
+                    <div className="chat-box__chat-log">{element.message}</div>
+                  </div>
+                );
+              } else {
+                return (
+                  <div className="chat-box__chat" key={index}>
+                    <div className="chat-box__chat-log">{element.message}</div>
+                  </div>
+                );
+              }
+            }
+  
+            // element.message가 이미지 URL일 때 (이미지 메시지인 경우)
+            else {
+              if (!checkMessageInterval(array[index].timeData - array[preIdx].timeData) || (preIdx <= 0 && index <= 0)) {
+                return (
+                  <div className="chat-box__chat" key={index}>
+                    <div className="chat-box__chatter-name">
+                      {element.name}
+                      <div className="chat-box__chat-time">{element.date}</div>
+                    </div>
+                    <img className="chat-box__chat-image" src={element.message} alt="Uploaded" />
+                  </div>
+                );
+              } else {
+                return (
+                  <div className="chat-box__chat" key={index}>
+                    <img className="chat-box__chat-image" src={element.message} alt="Uploaded" />
+                  </div>
+                );
+              }
+            }
           }
-          else{
-            if(!checkMessageInterval(array[index].timeData - array[preIdx].timeData) || (preIdx <= 0 && index <= 0))
-              return(
-                <div className="chat-box__chat">
-                  <div className="chat-box__chatter-name">{element.name}<div className="chat-box__chat-time">{element.date}</div></div>
-                  <div className="chat-box__chat-log">{element.message}</div>
-                </div>
-              )
-            else
-              return(
-                <div className="chat-box__chat">
-                <div className="chat-box__chat-log">{element.message}</div>
-              </div>
-              )
-          }
-          })}
+
+          return null; // 텍스트와 이미지가 아닌 경우 (예외 처리)
+        })}
       </div>
       <form className="chat-box__input-wrapper" method="" onSubmit={(e)=>{e.preventDefault();}} onKeyDown={(e)=>{if(e.key === "Enter")e.preventDefault();}}>
         <div className="chat-box__image-uploader-wrapper">
@@ -183,7 +296,7 @@ const ChatBox = () => {
         {uploadedImageFile.map((element, index) => {
           return(
             <div className="chat-box__uploaded-file-wrapper">
-              <img src={URL.createObjectURL(element)} className={`chat-box__uploaded-file uploaded-file${index}`} onClick={()=>{removeUploadedImage(index);}}/>
+              <img src={(URL.createObjectURL(element))} className={`chat-box__uploaded-file uploaded-file${index}`} onClick={()=>{removeUploadedImage(index);}}/>
               <img src={removeUploadedImageIcon} className="chat-box__remove-uploaded-file-icon"/>
             </div>
           )

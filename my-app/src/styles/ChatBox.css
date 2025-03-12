@@ -184,6 +184,13 @@
   width: 20px;
 }
 
+.chat-box__chat-image{
+  width: 50%;
+  height: auto;
+  margin-top: 10px;
+  border-radius: 10px;
+}
+
 .disabled{
   display: none;
 }
