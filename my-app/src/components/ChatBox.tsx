@@ -44,6 +44,24 @@ const ChatBox: React.FC<SocketProps> = (props) => {
     receiveImageFile();
   }, []);
 
+  useEffect(() => {
+    socket.emit("enter room", props.curRoom)
+  }, [props.curRoom])
+
+  // 스크롤바 아래로
+  useEffect(() => {
+    chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+  }, [chatArr]);
+
+  // imageFile이 변경되면 배열이 비었는 지 검사.
+  useEffect(() => {
+    console.log(uploadedImageFile);
+    for(let el in uploadedImageFile){
+      return;
+    }
+    setFileArrayIsEmpty(true);
+  }, [uploadedImageFile]);
+
   const receiveMessage = () => {
     socket.on("receive message", (message) => {
       setChatArr((chatArr) => chatArr.concat(message));
@@ -67,23 +85,6 @@ const ChatBox: React.FC<SocketProps> = (props) => {
     });
   }
 
-  useEffect(() => {
-    socket.emit("enter room", props.curRoom)
-  }, [props.curRoom])
-
-  // 스크롤바 아래로
-  useEffect(() => {
-    chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
-  }, [chatArr]);
-
-  // imageFile이 변경되면 배열이 비었는 지 검사.
-  useEffect(() => {
-    console.log(uploadedImageFile);
-    for(let el in uploadedImageFile){
-      return;
-    }
-    setFileArrayIsEmpty(true);
-  }, [uploadedImageFile]);
 
   const getImageMimeType = (extension:string):string => {
     const mimeTypes = {
@@ -142,12 +143,7 @@ const ChatBox: React.FC<SocketProps> = (props) => {
   }
 
   // 현재 메세지와 이전 메세지의 시간차가 1분 이하라면 true 리턴.
-  const checkMessageInterval = (timeDiff:number) => {
-    if(timeDiff / (60 * 1000) <= 1)
-      return true;
-    else
-      return false;
-  }
+  const checkMessageInterval = (timeDiff: number) => timeDiff / (60 * 1000) <= 1;
 
   const buttonHandler = () => {
     const curDate = new Date();
@@ -194,26 +190,18 @@ const ChatBox: React.FC<SocketProps> = (props) => {
   }
 
   const imageUploaded = (e:React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files != null){
-      for(let i = 0; i < e.target.files.length; i++){
-        let file = [e.target.files![i]];
-
-        setUploadedImageFile((imageFile) => imageFile.concat(file));
-        e.target.value = "";
-      }
+    if (e.target.files) {
+      const filesArray = Array.from(e.target.files); // 파일 리스트를 배열로 변환
+      setUploadedImageFile((prevFiles) => [...prevFiles, ...filesArray]); // 한 번에 추가
+      e.target.value = ""; // input 초기화
     }
 
     setFileArrayIsEmpty(false);
   }
 
   const removeUploadedImage = (index:number) => {
-    setUploadedImageFile((imageFile) => {
-      delete imageFile[index];
-      return imageFile;
-    });
-
     // 빈 배열을 concat해서 배열의 상태를 변화시킨 뒤 re-render
-    setUploadedImageFile((imageFile) => imageFile.concat([]));
+    setUploadedImageFile((imageFile) => imageFile.filter((_, i) => i !== index));
   }
 
   const keyEventHandler = (e:React.KeyboardEvent<HTMLInputElement>) => {
@@ -261,7 +249,6 @@ const ChatBox: React.FC<SocketProps> = (props) => {
                 );
               }
             }
-  
             // element.message가 이미지 URL일 때 (이미지 메시지인 경우)
             else {
               if (!checkMessageInterval(array[index].timeData - array[preIdx].timeData) || (preIdx <= 0 && index <= 0)) {

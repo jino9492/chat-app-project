@@ -4,6 +4,7 @@ const APP_URL = `http://localhost:${SERVER_PORT}`;
 
 const express = require('express');
 const app = express();
+const mysql = require('mysql2');
 const httpServer = require("http").createServer(app);
 const fs = require('fs');
 const path = require('path');
@@ -14,6 +15,21 @@ const io = require("socket.io")(httpServer, {
     methods: ["GET", "POST"],
   },
   maxHttpBufferSize: 1e8,
+});
+
+const db = mysql.createConnection({
+  host: 'localhost',
+  user: 'root',  // MySQL 사용자 이름
+  password: 'wjdwlsdhmysql112',  // MySQL 비밀번호
+  database: 'db',  // 사용할 데이터베이스 이름
+});
+
+db.connect((err) => {
+  if (err) {
+    console.error('MySQL 연결 실패:', err);
+    return;
+  }
+  console.log('MySQL 연결 성공');
 });
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -35,20 +51,18 @@ io.on("connection", (socket) => {
   // 텍스트 통신
   socket.on("send message", (item) => {
     console.log(item.name + ": " + item.message + " / " + item.date + " / " + item.timeData + " / " + item.roomName);
-    socket.emit("receive message", {
-      name : item.name,
-      message: item.message,
-      date: item.date,
-      timeData: item.timeData,
-      roomName:item.roomName
+
+    const query = "INSERT INTO messages (name, message, date, time, room) VALUES (?, ?, ?, ?, ?)";
+    db.query(query, [item.name, item.message, item.date, item.timeData, item.roomName], (err, result) => {
+      if (err) {
+        console.error("채팅 메시지 저장 실패:", err);
+      } else {
+        console.log("채팅 메시지 저장 성공:", result.insertId);
+      }
     });
-    socket.to(item.roomName).emit("receive message", {
-      name : item.name,
-      message: item.message,
-      date: item.date,
-      timeData: item.timeData,
-      roomName:item.roomName
-    });
+
+    socket.emit("receive message", item);
+    socket.to(item.roomName).emit("receive message", item);
   })
 
   // 이미지 통신
@@ -63,10 +77,20 @@ io.on("connection", (socket) => {
         socket.emit("error", "파일 저장 실패")
       }
       else{
-        console.log('이미지 저장 완료:', `${APP_URL}/uploads/${fileName}`);
+        const imageURL = `${APP_URL}/uploads/${fileName}`;
+        console.log('이미지 저장 완료:', imageURL);
+        const query = "INSERT INTO images (name, file_url, date, time, room) VALUES (?, ?, ?, ?, ?)";
+        db.query(query, [data.name, imageURL, data.date, data.timeData, data.roomName], (err, result) => {
+          if (err) {
+            console.error("이미지 데이터 저장 실패:", err);
+          } else {
+            console.log("이미지 데이터 저장 성공:", result.insertId);
+          }
+        });
+
         socket.emit("recieve image file", {
           name: data.name,
-          file: `${APP_URL}/uploads/${fileName}`,
+          file: imageURL,
           date: data.date,
           type: data.type,
           timeData: data.timeData,
